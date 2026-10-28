@@ -124,3 +124,44 @@ export function getHostInfo(): HostInfo {
   const {dir, source} = resolveUserDataDir();
   return {appName: config.appName || '', userDataDir: dir, source, isCursor: isCursorHost()};
 }
+
+/**
+ * Converts a file:// URI from workspace.json to a native path.
+ * On Windows, "file:///c%3A/repos/app" becomes "C:\repos\app" (not "/c:/repos/app"),
+ * and "file://server/share/app" becomes "\\server\share\app".
+ * Other URI schemes (for example vscode-remote://) are returned decoded.
+ */
+export function fileUriToPath(uri: string, platform: NodeJS.Platform = os.platform()): string {
+  const decode = (s: string) => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  };
+  if (!uri.startsWith('file://')) return decode(uri);
+
+  let rest = uri.slice('file://'.length);
+  let authority = '';
+  const slash = rest.indexOf('/');
+  if (slash > 0) {
+    authority = rest.slice(0, slash);
+    rest = rest.slice(slash);
+  }
+  let p = decode(rest);
+  if (platform === 'win32') {
+    if (/^\/[a-zA-Z]:/.test(p)) p = p.slice(1);
+    p = p.replace(/\//g, '\\');
+    if (/^[a-z]:/.test(p)) p = p[0].toUpperCase() + p.slice(1);
+    if (authority) p = `\\\\${authority}${p}`;
+  } else if (authority) {
+    p = `//${authority}${p}`;
+  }
+  return p;
+}
+
+/** Last segment of a path that may use either separator. */
+export function pathBasename(p: string): string {
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : p;
+}

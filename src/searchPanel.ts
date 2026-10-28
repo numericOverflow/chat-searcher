@@ -146,7 +146,7 @@ export class ChatSearchPanel {
       const workspaceSet = new Set<string>();
       for (const [, meta] of this.indexedMeta) {
         if (meta.workspacePath) {
-          workspaceSet.add(meta.workspaceName || meta.workspacePath.split('/').pop() || meta.workspacePath);
+          workspaceSet.add(meta.workspaceName || meta.workspacePath.split(/[\\/]/).pop() || meta.workspacePath);
         }
       }
       const workspaces = [...workspaceSet].sort();
@@ -183,7 +183,7 @@ export class ChatSearchPanel {
       const m = result.metadata || {};
       if (!meta) return null;
 
-      const wsName = m.workspaceName as string || meta.workspaceName || (meta.workspacePath && meta.workspacePath.split('/').pop()) || meta.workspacePath;
+      const wsName = m.workspaceName as string || meta.workspaceName || (meta.workspacePath && meta.workspacePath.split(/[\\/]/).pop()) || meta.workspacePath;
       if (workspaceFilter && workspaceFilter !== 'all' && wsName !== workspaceFilter) {
         return null;
       }

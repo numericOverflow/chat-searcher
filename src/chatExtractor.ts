@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import {execFileSync} from 'child_process';
 import initSqlJs, {Database} from 'sql.js';
-import {getGlobalStateDbPath, getWorkspaceStorageDir} from './storagePaths';
+import {fileUriToPath, getGlobalStateDbPath, getWorkspaceStorageDir, pathBasename} from './storagePaths';
 
 export interface ChatMessage {
   role: string;
@@ -27,8 +27,11 @@ function getWorkspacePath(workspaceDir: string): string {
     const workspaceJsonPath = path.join(workspaceDir, 'workspace.json');
     if (fs.existsSync(workspaceJsonPath)) {
       const data = JSON.parse(fs.readFileSync(workspaceJsonPath, 'utf-8'));
-      if (data.folder) {
-        return decodeURIComponent(data.folder).replace(/^file:\/\//, '');
+      if (typeof data.folder === 'string' && data.folder) {
+        return fileUriToPath(data.folder);
+      }
+      if (typeof data.workspace === 'string' && data.workspace) {
+        return fileUriToPath(data.workspace);
       }
     }
   } catch {
@@ -39,7 +42,7 @@ function getWorkspacePath(workspaceDir: string): string {
 
 function getWorkspaceName(workspaceDir: string): string {
   const p = getWorkspacePath(workspaceDir);
-  return path.basename(p) || p;
+  return pathBasename(p).replace(/\.code-workspace$/i, '') || p;
 }
 
 function escapeSqlString(s: string): string {

@@ -48,8 +48,11 @@ function getWorkspacePath(workspaceDir) {
         const workspaceJsonPath = path.join(workspaceDir, 'workspace.json');
         if (fs.existsSync(workspaceJsonPath)) {
             const data = JSON.parse(fs.readFileSync(workspaceJsonPath, 'utf-8'));
-            if (data.folder) {
-                return decodeURIComponent(data.folder).replace(/^file:\/\//, '');
+            if (typeof data.folder === 'string' && data.folder) {
+                return (0, storagePaths_1.fileUriToPath)(data.folder);
+            }
+            if (typeof data.workspace === 'string' && data.workspace) {
+                return (0, storagePaths_1.fileUriToPath)(data.workspace);
             }
         }
     }
@@ -60,7 +63,7 @@ function getWorkspacePath(workspaceDir) {
 }
 function getWorkspaceName(workspaceDir) {
     const p = getWorkspacePath(workspaceDir);
-    return path.basename(p) || p;
+    return (0, storagePaths_1.pathBasename)(p).replace(/\.code-workspace$/i, '') || p;
 }
 function escapeSqlString(s) {
     return s.replace(/'/g, "''");
