@@ -3,6 +3,10 @@ import {BM25Index, SearchDocument} from './bm25';
 import {extractDocumentsForSearch, getChatContentFromWorkspaceStorage} from './chatExtractor';
 import {injectChatIntoCurrentWorkspace, formatConversationAsMarkdown} from './workspaceChatInjector';
 
+function modifierKey(): string {
+  return process.platform === 'darwin' ? 'Cmd' : 'Ctrl';
+}
+
 interface IndexedMeta {
   workspaceHash: string;
   tabIndex: number;
@@ -271,7 +275,7 @@ export class ChatSearchPanel {
       if (result.injected) {
         this.panel.webview.postMessage({
           type: 'toast',
-          message: 'Chat added to this workspace. Reload the window (Cmd+Shift+P > Developer: Reload Window) to see it in chat.',
+          message: `Chat added to this workspace. Reload the window (${modifierKey()}+Shift+P > Developer: Reload Window) to see it in chat.`,
         });
         try {
           await vscode.commands.executeCommand('workbench.action.chat.open');
@@ -286,7 +290,7 @@ export class ChatSearchPanel {
     await vscode.env.clipboard.writeText(text);
     this.panel.webview.postMessage({
       type: 'toast',
-      message: 'Copied to clipboard. Paste into chat with Cmd+V.',
+      message: `Copied to clipboard. Paste into chat with ${modifierKey()}+V.`,
     });
     try {
       await vscode.commands.executeCommand('workbench.action.chat.open');
