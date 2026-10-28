@@ -1,8 +1,9 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import initSqlJs, {Database} from 'sql.js';
+import initSqlJs, {Database, SqlJsStatic} from 'sql.js';
 import {errorMessage, IndexStats, readDatabase, recordError, runSqliteCli} from './dbUtil';
-import {fileUriToPath, getGlobalStateDbPath, getUserDataDir, getWorkspaceStorageDir, pathBasename} from './storagePaths';
+import {fileUriToPath, getGlobalStateDbPath, getGlobalStorageDir, getUserDataDir, getWorkspaceStorageDir, isCursorHost, pathBasename} from './storagePaths';
+import {extractVsCodeDocuments, getVsCodeMessages, isVsCodeDocumentId} from './vscodeChatReader';
 
 export interface ChatMessage {
   role: string;
@@ -228,29 +229,59 @@ export interface ExtractDocumentsOptions {
   maxWorkspaces?: number;
 }
 
+function loadSqlJs(extensionPath: string): Promise<SqlJsStatic> {
+  const wasmBinary = fs.readFileSync(
+    path.join(extensionPath, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')
+  );
+  return initSqlJs({wasmBinary: wasmBinary.buffer as ArrayBuffer});
+}
+
+function describeWorkspace(workspaceDir: string): {workspacePath: string; workspaceName: string} {
+  return {workspacePath: getWorkspacePath(workspaceDir), workspaceName: getWorkspaceName(workspaceDir)};
+}
+
 export async function extractDocumentsForSearch(
   extensionPath: string,
   progressCallback?: (message: string) => void,
   options?: ExtractDocumentsOptions
 ): Promise<IndexDocument[]> {
-  const docs: IndexDocument[] = [];
   const report = (msg: string) => progressCallback?.(msg);
   const stats: IndexStats = {failed: 0, errors: []};
   const storagePath = getWorkspaceStorageDir();
   if (!fs.existsSync(storagePath)) {
     report(`No chat storage found: ${storagePath} does not exist.`);
-    return docs;
+    return [];
   }
 
-  const wasmBinary = fs.readFileSync(
-    path.join(extensionPath, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')
-  );
-  const SQL = await initSqlJs({wasmBinary: wasmBinary.buffer as ArrayBuffer});
+  const SQL = await loadSqlJs(extensionPath);
+  let docs: IndexDocument[] = [];
+  // Cursor keeps chats in its own tables. VS Code keeps one file per chat session.
+  if (isCursorHost()) {
+    docs = docs.concat(extractCursorDocuments(SQL, storagePath, report, stats, options));
+  }
+  let vscodeDocs = extractVsCodeDocuments(SQL, storagePath, getGlobalStorageDir(), describeWorkspace, report, stats);
+  if (typeof options?.maxWorkspaces === 'number') {
+    const keep = new Set([...new Set(vscodeDocs.map((d) => d.workspaceHash))].slice(0, options.maxWorkspaces));
+    vscodeDocs = vscodeDocs.filter((d) => keep.has(d.workspaceHash));
+  }
+  docs = docs.concat(vscodeDocs);
 
+  report(summarizeIndex(docs.length, stats));
+  return docs;
+}
+
+function extractCursorDocuments(
+  SQL: SqlJsStatic,
+  storagePath: string,
+  report: (message: string) => void,
+  stats: IndexStats,
+  options?: ExtractDocumentsOptions
+): IndexDocument[] {
+  const docs: IndexDocument[] = [];
   const globalDbPath = getGlobalStateDbPath();
   const globalDbExists = fs.existsSync(globalDbPath);
 
-  report('Loading conversation data...');
+  report('Loading Cursor conversation data...');
 
   let allBubbles: Map<string, ChatMessage[]> | null = null;
   let globalDb: Database | null = null;
@@ -279,7 +310,7 @@ export async function extractDocumentsForSearch(
   })).filter((d) => fs.existsSync(d.dbPath));
   const dbDirs = typeof maxWorkspaces === 'number' ? allDbDirs.slice(0, maxWorkspaces) : allDbDirs;
 
-  report(`Scanning ${dbDirs.length} workspace(s)...`);
+  report(`Scanning ${dbDirs.length} Cursor workspace(s)...`);
 
   for (let i = 0; i < dbDirs.length; i++) {
     const {hash, workspaceDir, dbPath} = dbDirs[i];
@@ -328,7 +359,6 @@ export async function extractDocumentsForSearch(
     globalDb.close();
   }
 
-  report(summarizeIndex(docs.length, stats));
   return docs;
 }
 
@@ -338,10 +368,10 @@ export async function getChatContentFromWorkspaceStorage(
   tabIndex: number,
   composerId?: string
 ): Promise<ChatMessage[]> {
-  const wasmBinary = fs.readFileSync(
-    path.join(extensionPath, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')
-  );
-  const SQL = await initSqlJs({wasmBinary: wasmBinary.buffer as ArrayBuffer});
+  if (composerId && isVsCodeDocumentId(composerId)) {
+    return getVsCodeMessages(composerId);
+  }
+  const SQL = await loadSqlJs(extensionPath);
   const globalDbPath = getGlobalStateDbPath();
 
   if (composerId && fs.existsSync(globalDbPath)) {

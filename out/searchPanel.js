@@ -111,7 +111,8 @@ class ChatSearchPanel {
                 this.indexedMeta.set(doc.id, {
                     workspaceHash: doc.workspaceHash,
                     tabIndex: doc.tabIndex,
-                    composerId: composerMatch ? composerMatch[1] : undefined,
+                    // VS Code sessions are looked up by their full document id.
+                    composerId: composerMatch ? composerMatch[1] : (doc.id.includes('::vscode::') ? doc.id : undefined),
                     workspacePath: doc.workspacePath,
                     workspaceName: doc.workspaceName,
                     title: doc.title,

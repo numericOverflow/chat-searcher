@@ -43,6 +43,7 @@ const fs = __importStar(require("fs"));
 const sql_js_1 = __importDefault(require("sql.js"));
 const dbUtil_1 = require("./dbUtil");
 const storagePaths_1 = require("./storagePaths");
+const vscodeChatReader_1 = require("./vscodeChatReader");
 function getWorkspacePath(workspaceDir) {
     try {
         const workspaceJsonPath = path.join(workspaceDir, 'workspace.json');
@@ -231,20 +232,41 @@ function summarizeIndex(count, stats) {
         summary += ` First problem: ${stats.errors[0]}`;
     return summary;
 }
+function loadSqlJs(extensionPath) {
+    const wasmBinary = fs.readFileSync(path.join(extensionPath, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'));
+    return (0, sql_js_1.default)({ wasmBinary: wasmBinary.buffer });
+}
+function describeWorkspace(workspaceDir) {
+    return { workspacePath: getWorkspacePath(workspaceDir), workspaceName: getWorkspaceName(workspaceDir) };
+}
 async function extractDocumentsForSearch(extensionPath, progressCallback, options) {
-    const docs = [];
     const report = (msg) => progressCallback?.(msg);
     const stats = { failed: 0, errors: [] };
     const storagePath = (0, storagePaths_1.getWorkspaceStorageDir)();
     if (!fs.existsSync(storagePath)) {
         report(`No chat storage found: ${storagePath} does not exist.`);
-        return docs;
+        return [];
     }
-    const wasmBinary = fs.readFileSync(path.join(extensionPath, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'));
-    const SQL = await (0, sql_js_1.default)({ wasmBinary: wasmBinary.buffer });
+    const SQL = await loadSqlJs(extensionPath);
+    let docs = [];
+    // Cursor keeps chats in its own tables. VS Code keeps one file per chat session.
+    if ((0, storagePaths_1.isCursorHost)()) {
+        docs = docs.concat(extractCursorDocuments(SQL, storagePath, report, stats, options));
+    }
+    let vscodeDocs = (0, vscodeChatReader_1.extractVsCodeDocuments)(SQL, storagePath, (0, storagePaths_1.getGlobalStorageDir)(), describeWorkspace, report, stats);
+    if (typeof options?.maxWorkspaces === 'number') {
+        const keep = new Set([...new Set(vscodeDocs.map((d) => d.workspaceHash))].slice(0, options.maxWorkspaces));
+        vscodeDocs = vscodeDocs.filter((d) => keep.has(d.workspaceHash));
+    }
+    docs = docs.concat(vscodeDocs);
+    report(summarizeIndex(docs.length, stats));
+    return docs;
+}
+function extractCursorDocuments(SQL, storagePath, report, stats, options) {
+    const docs = [];
     const globalDbPath = (0, storagePaths_1.getGlobalStateDbPath)();
     const globalDbExists = fs.existsSync(globalDbPath);
-    report('Loading conversation data...');
+    report('Loading Cursor conversation data...');
     let allBubbles = null;
     let globalDb = null;
     if (globalDbExists) {
@@ -269,7 +291,7 @@ async function extractDocumentsForSearch(extensionPath, progressCallback, option
         dbPath: path.join(storagePath, e.name, 'state.vscdb'),
     })).filter((d) => fs.existsSync(d.dbPath));
     const dbDirs = typeof maxWorkspaces === 'number' ? allDbDirs.slice(0, maxWorkspaces) : allDbDirs;
-    report(`Scanning ${dbDirs.length} workspace(s)...`);
+    report(`Scanning ${dbDirs.length} Cursor workspace(s)...`);
     for (let i = 0; i < dbDirs.length; i++) {
         const { hash, workspaceDir, dbPath } = dbDirs[i];
         if (i % 50 === 0)
@@ -314,12 +336,13 @@ async function extractDocumentsForSearch(extensionPath, progressCallback, option
     if (globalDb) {
         globalDb.close();
     }
-    report(summarizeIndex(docs.length, stats));
     return docs;
 }
 async function getChatContentFromWorkspaceStorage(extensionPath, workspaceHash, tabIndex, composerId) {
-    const wasmBinary = fs.readFileSync(path.join(extensionPath, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'));
-    const SQL = await (0, sql_js_1.default)({ wasmBinary: wasmBinary.buffer });
+    if (composerId && (0, vscodeChatReader_1.isVsCodeDocumentId)(composerId)) {
+        return (0, vscodeChatReader_1.getVsCodeMessages)(composerId);
+    }
+    const SQL = await loadSqlJs(extensionPath);
     const globalDbPath = (0, storagePaths_1.getGlobalStateDbPath)();
     if (composerId && fs.existsSync(globalDbPath)) {
         const messages = getBubblesForComposerCli(globalDbPath, composerId);
