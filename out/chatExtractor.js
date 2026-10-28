@@ -40,35 +40,9 @@ exports.extractDocumentsForSearch = extractDocumentsForSearch;
 exports.getChatContentFromWorkspaceStorage = getChatContentFromWorkspaceStorage;
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
 const sql_js_1 = __importDefault(require("sql.js"));
-function getCursorStoragePath() {
-    const home = os.homedir();
-    switch (os.platform()) {
-        case 'darwin':
-            return path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'workspaceStorage');
-        case 'linux':
-            return path.join(home, '.config', 'Cursor', 'User', 'workspaceStorage');
-        case 'win32':
-            return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Cursor', 'User', 'workspaceStorage');
-        default:
-            throw new Error(`Unsupported platform: ${os.platform()}`);
-    }
-}
-function getGlobalStoragePath() {
-    const home = os.homedir();
-    switch (os.platform()) {
-        case 'darwin':
-            return path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
-        case 'linux':
-            return path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
-        case 'win32':
-            return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Cursor', 'User', 'globalStorage', 'state.vscdb');
-        default:
-            throw new Error(`Unsupported platform: ${os.platform()}`);
-    }
-}
+const storagePaths_1 = require("./storagePaths");
 function getWorkspacePath(workspaceDir) {
     try {
         const workspaceJsonPath = path.join(workspaceDir, 'workspace.json');
@@ -250,13 +224,13 @@ function getBubblesForComposerFromDb(globalDb, composerId) {
 }
 async function extractDocumentsForSearch(extensionPath, progressCallback, options) {
     const docs = [];
-    const storagePath = getCursorStoragePath();
+    const storagePath = (0, storagePaths_1.getWorkspaceStorageDir)();
     if (!fs.existsSync(storagePath))
         return docs;
     const report = (msg) => progressCallback?.(msg);
     const wasmBinary = fs.readFileSync(path.join(extensionPath, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'));
     const SQL = await (0, sql_js_1.default)({ wasmBinary: wasmBinary.buffer });
-    const globalDbPath = getGlobalStoragePath();
+    const globalDbPath = (0, storagePaths_1.getGlobalStateDbPath)();
     const globalDbExists = fs.existsSync(globalDbPath);
     report('Loading conversation data...');
     let allBubbles = null;
@@ -335,7 +309,7 @@ async function extractDocumentsForSearch(extensionPath, progressCallback, option
 async function getChatContentFromWorkspaceStorage(extensionPath, workspaceHash, tabIndex, composerId) {
     const wasmBinary = fs.readFileSync(path.join(extensionPath, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'));
     const SQL = await (0, sql_js_1.default)({ wasmBinary: wasmBinary.buffer });
-    const globalDbPath = getGlobalStoragePath();
+    const globalDbPath = (0, storagePaths_1.getGlobalStateDbPath)();
     if (composerId && fs.existsSync(globalDbPath)) {
         const messages = getBubblesForComposerCli(globalDbPath, composerId);
         if (messages.length > 0)
@@ -352,7 +326,7 @@ async function getChatContentFromWorkspaceStorage(extensionPath, workspaceHash, 
             // ignore
         }
     }
-    const storagePath = getCursorStoragePath();
+    const storagePath = (0, storagePaths_1.getWorkspaceStorageDir)();
     const wsDbPath = path.join(storagePath, workspaceHash, 'state.vscdb');
     if (!fs.existsSync(wsDbPath))
         return [];

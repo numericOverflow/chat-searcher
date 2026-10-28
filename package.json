@@ -50,7 +50,18 @@
         "key": "ctrl+shift+h",
         "mac": "cmd+shift+h"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Chat Searcher",
+      "properties": {
+        "chatSearcher.userDataDir": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Full path to the IDE's `User` data folder (the folder that contains `workspaceStorage` and `globalStorage`). Leave empty to detect it from the running IDE. Example: `C:\\Users\\me\\AppData\\Roaming\\Code\\User`."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
