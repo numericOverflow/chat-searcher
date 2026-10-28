@@ -96,7 +96,9 @@ export class ChatSearchPanel {
     });
 
     try {
+      let lastStatus = '';
       const docs = await extractDocumentsForSearch(this.extensionPath, (msg) => {
+        lastStatus = msg;
         this.panel.webview.postMessage({type: 'status', message: msg});
       });
 
@@ -140,7 +142,9 @@ export class ChatSearchPanel {
 
       this.panel.webview.postMessage({
         type: 'status',
-        message: `Ready! ${this.bm25Index.size} chat tab(s) indexed.`,
+        message: this.bm25Index.size > 0
+          ? `Ready! ${this.bm25Index.size} chat tab(s) indexed.`
+          : `No chats found. ${lastStatus}`,
       });
 
       const workspaceSet = new Set<string>();

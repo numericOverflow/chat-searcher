@@ -1,8 +1,8 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import {execFileSync} from 'child_process';
 import initSqlJs, {Database} from 'sql.js';
-import {fileUriToPath, getGlobalStateDbPath, getWorkspaceStorageDir, pathBasename} from './storagePaths';
+import {errorMessage, IndexStats, readDatabase, recordError, runSqliteCli} from './dbUtil';
+import {fileUriToPath, getGlobalStateDbPath, getUserDataDir, getWorkspaceStorageDir, pathBasename} from './storagePaths';
 
 export interface ChatMessage {
   role: string;
@@ -98,7 +98,7 @@ function rawBubblesToMessages(bubbles: RawBubble[]): ChatMessage[] {
   }));
 }
 
-function loadAllBubblesFromGlobalCli(globalDbPath: string): Map<string, ChatMessage[]> | null {
+function loadAllBubblesFromGlobalCli(globalDbPath: string, stats?: IndexStats): Map<string, ChatMessage[]> | null {
   try {
     const sql = [
       "SELECT key,",
@@ -110,10 +110,7 @@ function loadAllBubblesFromGlobalCli(globalDbPath: string): Map<string, ChatMess
       "AND json_extract(value, '$.type') IN (1, 2)",
     ].join(' ');
 
-    const output = execFileSync('sqlite3', ['-json', globalDbPath, sql], {
-      maxBuffer: 200 * 1024 * 1024,
-      encoding: 'utf-8',
-    }).toString();
+    const output = runSqliteCli(globalDbPath, sql, 200 * 1024 * 1024);
 
     const rows = JSON.parse(output || '[]') as Array<{key: string; type: number; text: string; createdAt: number | null}>;
     const composerBubbles = new Map<string, RawBubble[]>();
@@ -144,7 +141,11 @@ function loadAllBubblesFromGlobalCli(globalDbPath: string): Map<string, ChatMess
       result.set(composerId, rawBubblesToMessages(bubbles));
     }
     return result;
-  } catch {
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    recordError(stats, code === 'ENOENT'
+      ? 'sqlite3 was not found on PATH'
+      : `sqlite3 query failed: ${errorMessage(err)}`);
     return null;
   }
 }
@@ -162,10 +163,7 @@ function getBubblesForComposerCli(globalDbPath: string, composerId: string): Cha
       "AND json_extract(value, '$.type') IN (1, 2)",
     ].join(' ');
 
-    const output = execFileSync('sqlite3', ['-json', globalDbPath, sql], {
-      maxBuffer: 50 * 1024 * 1024,
-      encoding: 'utf-8',
-    }).toString();
+    const output = runSqliteCli(globalDbPath, sql, 50 * 1024 * 1024);
 
     const rows = JSON.parse(output || '[]') as Array<{type: number; text: string; createdAt: number | null}>;
     const bubbles: RawBubble[] = [];
@@ -219,6 +217,13 @@ function getBubblesForComposerFromDb(globalDb: Database, composerId: string): Ch
   }
 }
 
+function summarizeIndex(count: number, stats: IndexStats): string {
+  let summary = `Indexed ${count} conversation(s) from ${getUserDataDir()}.`;
+  if (stats.failed > 0) summary += ` ${stats.failed} file(s) could not be read.`;
+  if (stats.errors.length > 0) summary += ` First problem: ${stats.errors[0]}`;
+  return summary;
+}
+
 export interface ExtractDocumentsOptions {
   maxWorkspaces?: number;
 }
@@ -229,10 +234,14 @@ export async function extractDocumentsForSearch(
   options?: ExtractDocumentsOptions
 ): Promise<IndexDocument[]> {
   const docs: IndexDocument[] = [];
-  const storagePath = getWorkspaceStorageDir();
-  if (!fs.existsSync(storagePath)) return docs;
-
   const report = (msg: string) => progressCallback?.(msg);
+  const stats: IndexStats = {failed: 0, errors: []};
+  const storagePath = getWorkspaceStorageDir();
+  if (!fs.existsSync(storagePath)) {
+    report(`No chat storage found: ${storagePath} does not exist.`);
+    return docs;
+  }
+
   const wasmBinary = fs.readFileSync(
     path.join(extensionPath, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')
   );
@@ -247,13 +256,12 @@ export async function extractDocumentsForSearch(
   let globalDb: Database | null = null;
 
   if (globalDbExists) {
-    allBubbles = loadAllBubblesFromGlobalCli(globalDbPath);
+    allBubbles = loadAllBubblesFromGlobalCli(globalDbPath, stats);
     if (!allBubbles) {
       try {
-        const globalBuf = fs.readFileSync(globalDbPath);
-        globalDb = new SQL.Database(new Uint8Array(globalBuf));
-      } catch {
-        // ignore
+        globalDb = readDatabase(SQL, globalDbPath);
+      } catch (err) {
+        recordError(stats, `Cannot load ${globalDbPath}: ${errorMessage(err)}`);
       }
     }
   }
@@ -277,8 +285,7 @@ export async function extractDocumentsForSearch(
     const {hash, workspaceDir, dbPath} = dbDirs[i];
     if (i % 50 === 0) report(`Scanning ${i + 1}/${dbDirs.length}...`);
     try {
-      const fileBuffer = fs.readFileSync(dbPath);
-      const db = new SQL.Database(new Uint8Array(fileBuffer));
+      const db = readDatabase(SQL, dbPath);
       const workspacePath = getWorkspacePath(workspaceDir);
       const workspaceName = getWorkspaceName(workspaceDir);
 
@@ -311,8 +318,9 @@ export async function extractDocumentsForSearch(
       }
 
       db.close();
-    } catch {
-      // skip unreadable db
+    } catch (err) {
+      stats.failed++;
+      recordError(stats, `Cannot read ${dbPath}: ${errorMessage(err)}`);
     }
   }
 
@@ -320,7 +328,7 @@ export async function extractDocumentsForSearch(
     globalDb.close();
   }
 
-  report(`Indexed ${docs.length} conversation(s).`);
+  report(summarizeIndex(docs.length, stats));
   return docs;
 }
 
@@ -340,8 +348,7 @@ export async function getChatContentFromWorkspaceStorage(
     const messages = getBubblesForComposerCli(globalDbPath, composerId);
     if (messages.length > 0) return messages;
     try {
-      const globalBuf = fs.readFileSync(globalDbPath);
-      const globalDb = new SQL.Database(new Uint8Array(globalBuf));
+      const globalDb = readDatabase(SQL, globalDbPath);
       const msgs = getBubblesForComposerFromDb(globalDb, composerId);
       globalDb.close();
       if (msgs.length > 0) return msgs;
@@ -354,18 +361,21 @@ export async function getChatContentFromWorkspaceStorage(
   const wsDbPath = path.join(storagePath, workspaceHash, 'state.vscdb');
   if (!fs.existsSync(wsDbPath)) return [];
 
-  const fileBuffer = fs.readFileSync(wsDbPath);
-  const wsDb = new SQL.Database(new Uint8Array(fileBuffer));
-  const composers = getComposerIdsFromDb(wsDb);
-  wsDb.close();
+  let composers: ComposerMeta[];
+  try {
+    const wsDb = readDatabase(SQL, wsDbPath);
+    composers = getComposerIdsFromDb(wsDb);
+    wsDb.close();
+  } catch {
+    return [];
+  }
 
   if (composers.length > 0 && tabIndex >= 0 && tabIndex < composers.length && fs.existsSync(globalDbPath)) {
     const cid = composers[tabIndex].composerId;
     const messages = getBubblesForComposerCli(globalDbPath, cid);
     if (messages.length > 0) return messages;
     try {
-      const globalBuf = fs.readFileSync(globalDbPath);
-      const globalDb = new SQL.Database(new Uint8Array(globalBuf));
+      const globalDb = readDatabase(SQL, globalDbPath);
       const msgs = getBubblesForComposerFromDb(globalDb, cid);
       globalDb.close();
       if (msgs.length > 0) return msgs;

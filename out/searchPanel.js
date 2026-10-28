@@ -96,7 +96,9 @@ class ChatSearchPanel {
             message: 'Scanning workspaceStorage for chat tabs...',
         });
         try {
+            let lastStatus = '';
             const docs = await (0, chatExtractor_1.extractDocumentsForSearch)(this.extensionPath, (msg) => {
+                lastStatus = msg;
                 this.panel.webview.postMessage({ type: 'status', message: msg });
             });
             this.panel.webview.postMessage({
@@ -133,7 +135,9 @@ class ChatSearchPanel {
             this.isIndexing = false;
             this.panel.webview.postMessage({
                 type: 'status',
-                message: `Ready! ${this.bm25Index.size} chat tab(s) indexed.`,
+                message: this.bm25Index.size > 0
+                    ? `Ready! ${this.bm25Index.size} chat tab(s) indexed.`
+                    : `No chats found. ${lastStatus}`,
             });
             const workspaceSet = new Set();
             for (const [, meta] of this.indexedMeta) {
