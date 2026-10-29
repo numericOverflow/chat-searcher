@@ -160,8 +160,14 @@ export function fileUriToPath(uri: string, platform: NodeJS.Platform = os.platfo
   return p;
 }
 
-/** Last segment of a path that may use either separator. */
-export function pathBasename(p: string): string {
-  const parts = p.split(/[\\/]/).filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : p;
+/**
+ * Last segment of a path, using the path rules of the platform.
+ * On Windows, both "\" and "/" are separators. On macOS and Linux, only "/"
+ * is a separator, because "\" is a valid character in a file name there.
+ * Paths taken from URIs (for example vscode-remote:// workspaces) use "/",
+ * which both rules accept. Trailing separators are ignored.
+ */
+export function pathBasename(p: string, platform: NodeJS.Platform = os.platform()): string {
+  const rules = platform === 'win32' ? path.win32 : path.posix;
+  return rules.basename(p) || p;
 }

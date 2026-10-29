@@ -38,6 +38,7 @@ const vscode = __importStar(require("vscode"));
 const bm25_1 = require("./bm25");
 const chatExtractor_1 = require("./chatExtractor");
 const workspaceChatInjector_1 = require("./workspaceChatInjector");
+const storagePaths_1 = require("./storagePaths");
 function modifierKey() {
     return process.platform === 'darwin' ? 'Cmd' : 'Ctrl';
 }
@@ -146,7 +147,7 @@ class ChatSearchPanel {
             const workspaceSet = new Set();
             for (const [, meta] of this.indexedMeta) {
                 if (meta.workspacePath) {
-                    workspaceSet.add(meta.workspaceName || meta.workspacePath.split(/[\\/]/).pop() || meta.workspacePath);
+                    workspaceSet.add(meta.workspaceName || (0, storagePaths_1.pathBasename)(meta.workspacePath));
                 }
             }
             const workspaces = [...workspaceSet].sort();
@@ -179,7 +180,7 @@ class ChatSearchPanel {
             const m = result.metadata || {};
             if (!meta)
                 return null;
-            const wsName = m.workspaceName || meta.workspaceName || (meta.workspacePath && meta.workspacePath.split(/[\\/]/).pop()) || meta.workspacePath;
+            const wsName = m.workspaceName || meta.workspaceName || (meta.workspacePath && (0, storagePaths_1.pathBasename)(meta.workspacePath)) || meta.workspacePath;
             if (workspaceFilter && workspaceFilter !== 'all' && wsName !== workspaceFilter) {
                 return null;
             }
