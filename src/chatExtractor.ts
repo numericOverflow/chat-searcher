@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import initSqlJs, {Database, SqlJsStatic} from 'sql.js';
-import {errorMessage, IndexStats, readDatabase, recordError, runSqliteCli} from './dbUtil';
+import {errorMessage, IndexStats, readDatabase, recordError, resetSqliteCliSupport, runSqliteCli} from './dbUtil';
 import {fileUriToPath, getGlobalStateDbPath, getGlobalStorageDir, getUserDataDir, getWorkspaceStorageDir, isCursorHost, pathBasename} from './storagePaths';
 import {extractVsCodeDocuments, getVsCodeMessages, isVsCodeDocumentId} from './vscodeChatReader';
 
@@ -143,10 +143,7 @@ function loadAllBubblesFromGlobalCli(globalDbPath: string, stats?: IndexStats): 
     }
     return result;
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    recordError(stats, code === 'ENOENT'
-      ? 'sqlite3 was not found on PATH'
-      : `sqlite3 query failed: ${errorMessage(err)}`);
+    recordError(stats, errorMessage(err));
     return null;
   }
 }
@@ -282,6 +279,7 @@ function extractCursorDocuments(
   const globalDbExists = fs.existsSync(globalDbPath);
 
   report('Loading Cursor conversation data...');
+  resetSqliteCliSupport();
 
   let allBubbles: Map<string, ChatMessage[]> | null = null;
   let globalDb: Database | null = null;

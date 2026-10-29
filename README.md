@@ -71,7 +71,7 @@ The global storage database can be 2+ GB, but Chat Searcher never loads it into 
 ## Requirements
 
 - macOS, Linux, or Windows
-- For Cursor only: `sqlite3` CLI (pre-installed on macOS and most Linux distros; optional on Windows -- falls back to in-memory loading for databases smaller than 2 GB)
+- For Cursor only: `sqlite3` CLI version 3.33.0 or later (pre-installed on macOS and most Linux distros; optional on Windows -- falls back to in-memory loading for databases smaller than 2 GB)
 
 ## Privacy
 

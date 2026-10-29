@@ -149,10 +149,7 @@ function loadAllBubblesFromGlobalCli(globalDbPath, stats) {
         return result;
     }
     catch (err) {
-        const code = err.code;
-        (0, dbUtil_1.recordError)(stats, code === 'ENOENT'
-            ? 'sqlite3 was not found on PATH'
-            : `sqlite3 query failed: ${(0, dbUtil_1.errorMessage)(err)}`);
+        (0, dbUtil_1.recordError)(stats, (0, dbUtil_1.errorMessage)(err));
         return null;
     }
 }
@@ -267,6 +264,7 @@ function extractCursorDocuments(SQL, storagePath, report, stats, options) {
     const globalDbPath = (0, storagePaths_1.getGlobalStateDbPath)();
     const globalDbExists = fs.existsSync(globalDbPath);
     report('Loading Cursor conversation data...');
+    (0, dbUtil_1.resetSqliteCliSupport)();
     let allBubbles = null;
     let globalDb = null;
     if (globalDbExists) {
